@@ -11,8 +11,7 @@ from six.moves import input
 import requests
 import botocore
 from botocore.client import Config
-from botocore.compat import urlsplit
-from botocore.compat import urljoin
+from botocore.compat import parse_qs, urlencode, urljoin, urlparse, urlsplit
 from botocore.compat import json
 from botocore.credentials import CachedCredentialFetcher
 import botocore.session
@@ -213,6 +212,20 @@ class GenericFormsBasedAuthenticator(SAMLAuthenticator):
         for element in root.findall(tag):
             if element.attrib.get(attr) == trait:
                 return element.attrib.get('value')
+
+    @staticmethod
+    def _append_query_string(url, kv):
+        """
+        Takes an arbitrary URL that may or may not have a query string.
+        Adds key=value pairs to the query string from a dictionary of
+        string:[string, string] items.
+        """
+        u = urlparse(url)
+        qs = parse_qs(u.query)
+        for k, v in kv.items():
+          qs[k] = qs.get(k, []) + v
+        u = u._replace(query=urlencode(qs, doseq=True))
+        return u.geturl()
 
 
 class OktaAuthenticator(GenericFormsBasedAuthenticator):
@@ -455,7 +468,7 @@ class OktaAuthenticator(GenericFormsBasedAuthenticator):
         # original code to keep the tests happy as the tests don't use
         # valid Okta responses ...
         session_token = parsed['sessionToken']
-        saml_url = endpoint + '?sessionToken=%s' % session_token
+        saml_url = self._append_query_string(endpoint, {'sessionToken': [session_token]})
         response = self._requests_session.get(saml_url)
         logger.info(
             'Received HTTP response of status code: %s', response.status_code)
