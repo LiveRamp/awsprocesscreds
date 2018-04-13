@@ -53,9 +53,9 @@ def saml(argv=None, prompter=getpass.getpass, client_creator=None,
     if args.verbose:
         logger = logging.getLogger('awsprocesscreds')
         logger.setLevel(logging.INFO)
-        handler = PrettyPrinterLogHandler(sys.stdout)
+        handler = PrettyPrinterLogHandler(sys.stderr)
         handler.setLevel(logging.INFO)
-        formatter = logging.Formatter('%(message)s')
+        formatter = logging.Formatter('[%(levelname)s][%(pathname)s:%(lineno)d] %(message)s')
         handler.setFormatter(formatter)
         logger.addHandler(handler)
 
