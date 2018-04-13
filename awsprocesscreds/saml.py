@@ -268,11 +268,20 @@ class OktaAuthenticator(GenericFormsBasedAuthenticator):
 
     def get_assertion_from_response(self, endpoint, parsed):
         session_token = parsed['sessionToken']
-        saml_url = endpoint + '?sessionToken=%s' % session_token
-        response = self._requests_session.get(saml_url)
-        logger.info(
-            'Received HTTP response of status code: %s', response.status_code)
-        r = self._extract_saml_assertion_from_response(response.text)
+        saml_url = self._append_query_string(
+            endpoint, {'sessionToken': [session_token]})
+        qs = parse_qs(urlparse(endpoint).query)
+        if 'RelayState' in qs:
+            login_url, form_data = self._retrieve_login_form_from_endpoint(
+                saml_url)
+            response = self._send_form_post(login_url, form_data)
+        else:
+            response = self._requests_session.get(saml_url)
+            logger.info(
+                'Received HTTP response of status code: %s',
+                response.status_code)
+            response = response.text
+        r = self._extract_saml_assertion_from_response(response)
         logger.info(
             'Received the following SAML assertion: \n%s', r,
             extra={'is_saml_assertion': True}
