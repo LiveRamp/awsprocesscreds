@@ -1,3 +1,4 @@
+from __future__ import print_function
 import base64
 import getpass
 import logging
@@ -6,11 +7,11 @@ from hashlib import sha1
 from copy import deepcopy
 
 import six
+from six.moves import input
 import requests
 import botocore
 from botocore.client import Config
-from botocore.compat import urlsplit
-from botocore.compat import urljoin
+from botocore.compat import parse_qs, urlencode, urljoin, urlparse, urlsplit
 from botocore.compat import json
 from botocore.credentials import CachedCredentialFetcher
 import botocore.session
@@ -103,7 +104,8 @@ class GenericFormsBasedAuthenticator(SAMLAuthenticator):
         self._requests_session = requests_session
         self._password_prompter = password_prompter
 
-    def is_suitable(self, config):
+    @staticmethod
+    def is_suitable(config):
         return config.get('saml_authentication_type') == 'form'
 
     def retrieve_saml_assertion(self, config):
@@ -139,11 +141,6 @@ class GenericFormsBasedAuthenticator(SAMLAuthenticator):
         response = self._send_form_post(login_url, form_data)
         return self._extract_saml_assertion_from_response(response)
 
-    def _validate_config_values(self, config):
-        for required in ['saml_endpoint', 'saml_username']:
-            if required not in config:
-                raise SAMLError(self._ERROR_MISSING_CONFIG % required)
-
     def _retrieve_login_form_from_endpoint(self, endpoint):
         response = self._requests_session.get(endpoint, verify=True)
         self._assert_non_error_response(response)
@@ -158,18 +155,14 @@ class GenericFormsBasedAuthenticator(SAMLAuthenticator):
                        for tag in login_form_html_node.findall(".//input"))
         return form_action, payload
 
-    def _assert_non_error_response(self, response):
+    def _send_form_post(self, login_url, form_data):
+        response = self._requests_session.post(
+            login_url, data=form_data, verify=True
+        )
         if response.status_code != 200:
-            raise SAMLError(
-                self._ERROR_BAD_RESPONSE % (response.status_code,
-                                            response.url))
-
-    def _parse_form_from_html(self, html):
-        # Scrape a form from html page, and return it as an elementtree element
-        parser = FormParser()
-        parser.feed(html)
-        if parser.forms:
-            return ET.fromstring(parser.extract_form(0))
+            raise SAMLError(self._ERROR_LOGIN_FAILED_NON_200 %
+                            response.status_code)
+        return response.text
 
     def _fill_in_form_values(self, config, form_data):
         username = config['saml_username']
@@ -182,19 +175,24 @@ class GenericFormsBasedAuthenticator(SAMLAuthenticator):
             form_data[self.PASSWORD_FIELD] = self._password_prompter(
                 "Password: ")
 
-    def _send_form_post(self, login_url, form_data):
-        response = self._requests_session.post(
-            login_url, data=form_data, verify=True
-        )
-        if response.status_code != 200:
-            raise SAMLError(self._ERROR_LOGIN_FAILED_NON_200 %
-                            response.status_code)
-        return response.text
+    @classmethod
+    def _validate_config_values(klass, config):
+        for required in ['saml_endpoint', 'saml_username']:
+            if required not in config:
+                raise SAMLError(klass._ERROR_MISSING_CONFIG % required)
 
-    def _extract_saml_assertion_from_response(self, response_body):
-        parsed = self._parse_form_from_html(response_body)
+    @classmethod
+    def _assert_non_error_response(klass, response):
+        if response.status_code != 200:
+            raise SAMLError(
+                klass._ERROR_BAD_RESPONSE % (response.status_code,
+                                             response.url))
+
+    @classmethod
+    def _extract_saml_assertion_from_response(klass, response_body):
+        parsed = klass._parse_form_from_html(response_body)
         if parsed is not None:
-            assertion = self._get_value_of_first_tag(
+            assertion = klass._get_value_of_first_tag(
                 parsed, 'input', 'name', 'SAMLResponse')
             if assertion is not None:
                 return assertion
@@ -205,16 +203,241 @@ class GenericFormsBasedAuthenticator(SAMLAuthenticator):
         # invalid password when trying to login, many IdPs will return a 200
         # status code and return HTML content that indicates an error occurred.
         # This is the error we'll present to the user.
-        raise SAMLError(self._ERROR_LOGIN_FAILED)
+        raise SAMLError(klass._ERROR_LOGIN_FAILED)
 
-    def _get_value_of_first_tag(self, root, tag, attr, trait):
+    @staticmethod
+    def _parse_form_from_html(html):
+        # Scrape a form from html page, and return it as an elementtree element
+        parser = FormParser()
+        parser.feed(html)
+        if parser.forms:
+            return ET.fromstring(parser.extract_form(0))
+
+    @staticmethod
+    def _get_value_of_first_tag(root, tag, attr, trait):
         for element in root.findall(tag):
             if element.attrib.get(attr) == trait:
                 return element.attrib.get('value')
 
+    @staticmethod
+    def _append_query_string(url, kv):
+        """
+        Takes an arbitrary URL that may or may not have a query string.
+        Adds key=value pairs to the query string from a dictionary of
+        string:[string, string] items.
+        """
+        u = urlparse(url)
+        qs = parse_qs(u.query)
+        for k, v in kv.items():
+          qs[k] = qs.get(k, []) + v
+        u = u._replace(query=urlencode(qs, doseq=True))
+        return u.geturl()
+
 
 class OktaAuthenticator(GenericFormsBasedAuthenticator):
     _AUTH_URL = '/api/v1/authn'
+
+    _ERROR_AUTH_CANCELLED = (
+        'Authentication cancelled'
+    )
+
+    _ERROR_LOCKED_OUT = (
+        "You are locked out of your Okta account. Go to %s to unlock it."
+    )
+
+    _ERROR_PASSWORD_EXPIRED = (
+        "Your password has expired. Go to %s to change it."
+    )
+
+    _ERROR_MFA_ENROLL = (
+        "You need to enroll a MFA first."
+    )
+
+    _MSG_AUTH_CODE = (
+        "Authentication code (RETURN to cancel): "
+    )
+
+    _MSG_ANSWER = (
+        "Answer (RETURN to cancel): "
+    )
+
+    _MSG_SMS_CODE = (
+        "Authentication code (RETURN to cancel, "
+        "'RESEND' to get new code sent): "
+    )
+
+    def get_response(self, prompt):
+        response = input(prompt)
+        if response == "":
+            raise SAMLError(self._ERROR_AUTH_CANCELLED)
+        return response
+
+    def get_assertion_from_response(self, endpoint, parsed):
+        session_token = parsed['sessionToken']
+        saml_url = self._append_query_string(
+            endpoint, {'sessionToken': [session_token]})
+        qs = parse_qs(urlparse(endpoint).query)
+        if 'RelayState' in qs:
+            login_url, form_data = self._retrieve_login_form_from_endpoint(
+                saml_url)
+            response = self._send_form_post(login_url, form_data)
+        else:
+            response = self._requests_session.get(saml_url)
+            logger.info(
+                'Received HTTP response of status code: %s',
+                response.status_code)
+            response = response.text
+        r = self._extract_saml_assertion_from_response(response)
+        logger.info(
+            'Received the following SAML assertion: \n%s', r,
+            extra={'is_saml_assertion': True}
+        )
+        return r
+
+    def process_mfa_totp(self, endpoint, url, statetoken):
+        while True:
+            response = self.get_response(self._MSG_AUTH_CODE)
+            totp_response = self._requests_session.post(
+                url,
+                headers={'Content-Type': 'application/json',
+                         'Accept': 'application/json'},
+                data=json.dumps({'stateToken': statetoken,
+                                 'passCode': response})
+            )
+            totp_parsed = json.loads(totp_response.text)
+            if totp_response.status_code == 200:
+                return self.get_assertion_from_response(endpoint, totp_parsed)
+            elif totp_response.status_code >= 400:
+                error = totp_parsed["errorCauses"][0]["errorSummary"]
+                self._password_prompter("%s\r\nPress RETURN to continue\r\n"
+                                        % error)
+
+    def process_mfa_push(self, endpoint, url, statetoken):
+        self._password_prompter(("Waiting for result of push notification ..."
+                                 "press RETURN to continue"))
+        while True:
+            totp_response = self._requests_session.post(
+                url,
+                headers={'Content-Type': 'application/json',
+                         'Accept': 'application/json'},
+                data=json.dumps({'stateToken': statetoken})
+            )
+            totp_parsed = json.loads(totp_response.text)
+            if totp_parsed["status"] == "SUCCESS":
+                return self.get_assertion_from_response(endpoint, totp_parsed)
+            elif totp_parsed["factorResult"] != "WAITING":
+                raise SAMLError(self._ERROR_AUTH_CANCELLED)
+
+    def process_mfa_security_question(self, endpoint, url, statetoken):
+        while True:
+            response = self.get_response(self._MSG_ANSWER)
+            totp_response = self._requests_session.post(
+                url,
+                headers={'Content-Type': 'application/json',
+                         'Accept': 'application/json'},
+                data=json.dumps({'stateToken': statetoken,
+                                 'answer': response})
+            )
+            totp_parsed = json.loads(totp_response.text)
+            if totp_response.status_code == 200:
+                return self.get_assertion_from_response(endpoint, totp_parsed)
+            elif totp_response.status_code >= 400:
+                error = totp_parsed["errorCauses"][0]["errorSummary"]
+                self._password_prompter("%s\r\nPress RETURN to continue\r\n"
+                                        % error)
+
+    def verify_sms_factor(self, url, statetoken, passcode):
+        body = {'stateToken': statetoken}
+        if passcode != "":
+            body['passCode'] = passcode
+        return self._requests_session.post(
+            url,
+            headers={'Content-Type': 'application/json',
+                     'Accept': 'application/json'},
+            data=json.dumps(body)
+        )
+
+    def process_mfa_sms(self, endpoint, url, statetoken):
+        # Need to trigger the initial code to be sent ...
+        self._password_prompter(("Requesting code to be sent to your phone ..."
+                                 " press RETURN to continue"))
+        self.verify_sms_factor(url, statetoken, "")
+        while True:
+            response = self.get_response(self._MSG_SMS_CODE)
+            if response == "RESEND":
+                response = ""
+            sms_response = self.verify_sms_factor(url, statetoken, response)
+            # If we've just requested a resend, don't check the result
+            # - just loop around to get the next response from the user.
+            if response != "":
+                sms_parsed = json.loads(sms_response.text)
+                if sms_response.status_code == 200:
+                    return self.get_assertion_from_response(endpoint,
+                                                            sms_parsed)
+                elif sms_response.status_code >= 400:
+                    error = sms_parsed["errorCauses"][0]["errorSummary"]
+                    self._password_prompter(("%s\r\n"
+                                             "Press RETURN to continue\r\n")
+                                            % error)
+
+    def display_mfa_choices(self, parsed):
+        index = 1
+        prompt = ""
+        for f in parsed["_embedded"]["factors"]:
+            if f["factorType"] == "token":
+                prompt += "%s: %s token\r\n" % (index, f["provider"])
+            elif f["factorType"] == "token:software:totp":
+                prompt += ("%s: %s authenticator app\r\n"
+                           % (index, f["provider"]))
+            elif f["factorType"] == "sms":
+                prompt += "%s: SMS text message\r\n" % index
+            elif f["factorType"] == "push":
+                prompt += "%s: Push notification\r\n" % index
+            elif f["factorType"] == "question":
+                prompt += "%s: Security question\r\n" % index
+            else:
+                prompt += "%s: %s %s\r\n" % (index,
+                                             f["provider"],
+                                             f["factorType"])
+            index += 1
+        return index, prompt
+
+    def get_mfa_choice(self, parsed):
+        while True:
+            count, prompt = self.display_mfa_choices(parsed)
+            prompt = ("Please choose from the following authentication"
+                      " choices:\r\n") + prompt
+            prompt += ("Enter the number corresponding to your choice "
+                       "or press RETURN to cancel authentication: ")
+            response = self._password_prompter(prompt)
+            choice = 0
+            try:
+                choice = int(response)
+            except ValueError:
+                pass
+            if choice > 0 and choice < count:
+                return choice
+
+    def process_mfa_verification(self, endpoint, parsed):
+        # If we've only got one factor, pick that automatically
+        if len(parsed["_embedded"]["factors"]) == 1:
+            choice = 1
+        else:
+            choice = self.get_mfa_choice(parsed)
+        factor = parsed["_embedded"]["factors"][choice - 1]
+        url = factor["_links"]["verify"]["href"]
+        statetoken = parsed["stateToken"]
+        if factor["factorType"] == "token:software:totp":
+            return self.process_mfa_totp(endpoint, url, statetoken)
+        elif factor["factorType"] == "push":
+            return self.process_mfa_push(endpoint, url, statetoken)
+        elif factor["factorType"] == "question":
+            return self.process_mfa_security_question(endpoint,
+                                                      url, statetoken)
+        elif factor["factorType"] == "sms":
+            return self.process_mfa_sms(endpoint, url, statetoken)
+        else:
+            raise SAMLError("Unsupported factor")
 
     def retrieve_saml_assertion(self, config):
         self._validate_config_values(config)
@@ -235,8 +458,32 @@ class OktaAuthenticator(GenericFormsBasedAuthenticator):
                              'password': password})
         )
         parsed = json.loads(response.text)
+        logger.info(
+            'Got status %s and response: %s',
+            response.status_code, response.text
+        )
+        if response.status_code == 401:
+            raise SAMLError(self._ERROR_LOGIN_FAILED_NON_200 %
+                            parsed["errorSummary"])
+        if "status" in parsed:
+            if parsed["status"] == "SUCCESS":
+                return self.get_assertion_from_response(endpoint, parsed)
+            elif parsed["status"] == "LOCKED_OUT":
+                raise SAMLError(self._ERROR_LOCKED_OUT %
+                                parsed["_links"]["href"])
+            elif parsed["status"] == "PASSWORD_EXPIRED":
+                raise SAMLError(self._ERROR_PASSWORD_EXPIRED %
+                                parsed["_links"]["href"])
+            elif parsed["status"] == "MFA_ENROLL":
+                raise SAMLError(self._ERROR_MFA_ENROLL)
+            elif parsed["status"] == "MFA_REQUIRED":
+                return self.process_mfa_verification(endpoint, parsed)
+        # If we get to here, the chances are we're running the functional
+        # tests and NOT running against Okta's service so keep the
+        # original code to keep the tests happy as the tests don't use
+        # valid Okta responses ...
         session_token = parsed['sessionToken']
-        saml_url = endpoint + '?sessionToken=%s' % session_token
+        saml_url = self._append_query_string(endpoint, {'sessionToken': [session_token]})
         response = self._requests_session.get(saml_url)
         logger.info(
             'Received HTTP response of status code: %s', response.status_code)
