@@ -369,8 +369,13 @@ class SAMLCredentialFetcher(CachedCredentialFetcher):
         return response
 
     def _create_client(self):
+        # Passing fake aws access key pair here so that botocore won't prompt
+        # for an aws login if we don't specify any keys in our aws configs
         return self._client_creator(
-            'sts', config=Config(signature_version=botocore.UNSIGNED)
+            'sts',
+            aws_access_key_id='PLACEHOLDER',
+            aws_secret_access_key='PLACEHOLDER',
+            config=Config(signature_version=botocore.UNSIGNED)
         )
 
     def _get_role_and_principal_arn(self, assertion):
