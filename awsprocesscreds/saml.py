@@ -229,7 +229,7 @@ class GenericFormsBasedAuthenticator(SAMLAuthenticator):
         u = urlparse(url)
         qs = parse_qs(u.query)
         for k, v in kv.items():
-          qs[k] = qs.get(k, []) + v
+            qs[k] = qs.get(k, []) + v
         u = u._replace(query=urlencode(qs, doseq=True))
         return u.geturl()
 
