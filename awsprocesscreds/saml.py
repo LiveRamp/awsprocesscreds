@@ -254,7 +254,7 @@ class OktaAuthenticator(GenericFormsBasedAuthenticator):
     )
 
     _MSG_AUTH_CODE = (
-        "Authentication code (RETURN to cancel): "
+        "Authentication code: "
     )
 
     _MSG_ANSWER = (
@@ -296,7 +296,7 @@ class OktaAuthenticator(GenericFormsBasedAuthenticator):
 
     def process_mfa_totp(self, endpoint, url, statetoken):
         while True:
-            response = self.get_response(self._MSG_AUTH_CODE)
+            response = self._password_prompter(self._MSG_AUTH_CODE)
             totp_response = self._requests_session.post(
                 url,
                 headers={'Content-Type': 'application/json',
@@ -313,8 +313,7 @@ class OktaAuthenticator(GenericFormsBasedAuthenticator):
                                         % error)
 
     def process_mfa_push(self, endpoint, url, statetoken):
-        self._password_prompter(("Waiting for result of push notification ..."
-                                 "press RETURN to continue"))
+        self._password_prompter(("Press RETURN to send push notification..."))
         while True:
             totp_response = self._requests_session.post(
                 url,
@@ -407,8 +406,7 @@ class OktaAuthenticator(GenericFormsBasedAuthenticator):
             count, prompt = self.display_mfa_choices(parsed)
             prompt = ("Please choose from the following authentication"
                       " choices:\r\n") + prompt
-            prompt += ("Enter the number corresponding to your choice "
-                       "or press RETURN to cancel authentication: ")
+            prompt += ("Enter the number corresponding to your choice: ")
             response = self._password_prompter(prompt)
             choice = 0
             try:
@@ -478,21 +476,6 @@ class OktaAuthenticator(GenericFormsBasedAuthenticator):
                 raise SAMLError(self._ERROR_MFA_ENROLL)
             elif parsed["status"] == "MFA_REQUIRED":
                 return self.process_mfa_verification(endpoint, parsed)
-        # If we get to here, the chances are we're running the functional
-        # tests and NOT running against Okta's service so keep the
-        # original code to keep the tests happy as the tests don't use
-        # valid Okta responses ...
-        session_token = parsed['sessionToken']
-        saml_url = self._append_query_string(endpoint, {'sessionToken': [session_token]})
-        response = self._requests_session.get(saml_url)
-        logger.info(
-            'Received HTTP response of status code: %s', response.status_code)
-        r = self._extract_saml_assertion_from_response(response.text)
-        logger.info(
-            'Received the following SAML assertion: \n%s', r,
-            extra={'is_saml_assertion': True}
-        )
-        return r
 
     def is_suitable(self, config):
         return (config.get('saml_authentication_type') == 'form' and
