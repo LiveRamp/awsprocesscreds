@@ -222,7 +222,8 @@ class GenericFormsBasedAuthenticator(SAMLAuthenticator):
     @staticmethod
     def _append_query_string(url, kv):
         """
-        Takes an arbitrary URL that may or may not have a query string.
+        Take an arbitrary URL that may or may not have a query string.
+
         Adds key=value pairs to the query string from a dictionary of
         string:[string, string] items.
         """
