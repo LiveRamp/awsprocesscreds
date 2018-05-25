@@ -186,7 +186,7 @@ class GenericFormsBasedAuthenticator(SAMLAuthenticator):
         if response.status_code != 200:
             raise SAMLError(
                 cls._ERROR_BAD_RESPONSE % (response.status_code,
-                                             response.url))
+                                           response.url))
 
     @classmethod
     def _extract_saml_assertion_from_response(cls, response_body):
