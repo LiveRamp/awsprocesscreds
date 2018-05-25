@@ -176,23 +176,23 @@ class GenericFormsBasedAuthenticator(SAMLAuthenticator):
                 "Password: ")
 
     @classmethod
-    def _validate_config_values(klass, config):
+    def _validate_config_values(cls, config):
         for required in ['saml_endpoint', 'saml_username']:
             if required not in config:
-                raise SAMLError(klass._ERROR_MISSING_CONFIG % required)
+                raise SAMLError(cls._ERROR_MISSING_CONFIG % required)
 
     @classmethod
-    def _assert_non_error_response(klass, response):
+    def _assert_non_error_response(cls, response):
         if response.status_code != 200:
             raise SAMLError(
-                klass._ERROR_BAD_RESPONSE % (response.status_code,
+                cls._ERROR_BAD_RESPONSE % (response.status_code,
                                              response.url))
 
     @classmethod
-    def _extract_saml_assertion_from_response(klass, response_body):
-        parsed = klass._parse_form_from_html(response_body)
+    def _extract_saml_assertion_from_response(cls, response_body):
+        parsed = cls._parse_form_from_html(response_body)
         if parsed is not None:
-            assertion = klass._get_value_of_first_tag(
+            assertion = cls._get_value_of_first_tag(
                 parsed, 'input', 'name', 'SAMLResponse')
             if assertion is not None:
                 return assertion
@@ -203,7 +203,7 @@ class GenericFormsBasedAuthenticator(SAMLAuthenticator):
         # invalid password when trying to login, many IdPs will return a 200
         # status code and return HTML content that indicates an error occurred.
         # This is the error we'll present to the user.
-        raise SAMLError(klass._ERROR_LOGIN_FAILED)
+        raise SAMLError(cls._ERROR_LOGIN_FAILED)
 
     @staticmethod
     def _parse_form_from_html(html):
@@ -212,12 +212,14 @@ class GenericFormsBasedAuthenticator(SAMLAuthenticator):
         parser.feed(html)
         if parser.forms:
             return ET.fromstring(parser.extract_form(0))
+        return None
 
     @staticmethod
     def _get_value_of_first_tag(root, tag, attr, trait):
         for element in root.findall(tag):
             if element.attrib.get(attr) == trait:
                 return element.attrib.get('value')
+        return None
 
     @staticmethod
     def _append_query_string(url, kv):
@@ -477,6 +479,7 @@ class OktaAuthenticator(GenericFormsBasedAuthenticator):
                 raise SAMLError(self._ERROR_MFA_ENROLL)
             elif parsed["status"] == "MFA_REQUIRED":
                 return self.process_mfa_verification(endpoint, parsed)
+        return None
 
     def is_suitable(self, config):
         return (config.get('saml_authentication_type') == 'form' and
