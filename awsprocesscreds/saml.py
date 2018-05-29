@@ -440,7 +440,6 @@ class OktaAuthenticator(GenericFormsBasedAuthenticator):
         else:
             raise SAMLError("Unsupported factor")
 
-    # pylint: disable=inconsistent-return-statements
     def retrieve_saml_assertion(self, config):
         self._validate_config_values(config)
         endpoint = config['saml_endpoint']
