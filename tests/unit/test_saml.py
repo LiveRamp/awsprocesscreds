@@ -351,9 +351,9 @@ class TestSAMLGenericFormsBasedAuthenticator(object):
 
     def test_append_query_string(self, generic_auth):
         appended = generic_auth._append_query_string(' \
-                       https: // www.google.com/search?q=42', {'hl': ['en']}
+                       https://www.google.com/search?q=42', {'hl': ['en']}
                                                      )
-        assert appended == 'https://www.google.com/search?q=42&hl=en'
+        assert appended.strip() == 'https://www.google.com/search?q=42&hl=en'
 
 
 class TestOktaAuthenticator(object):
