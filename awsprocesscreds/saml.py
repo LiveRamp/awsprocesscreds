@@ -176,23 +176,23 @@ class GenericFormsBasedAuthenticator(SAMLAuthenticator):
                 "Password: ")
 
     @classmethod
-    def _validate_config_values(klass, config):
+    def _validate_config_values(cls, config):
         for required in ['saml_endpoint', 'saml_username']:
             if required not in config:
-                raise SAMLError(klass._ERROR_MISSING_CONFIG % required)
+                raise SAMLError(cls._ERROR_MISSING_CONFIG % required)
 
     @classmethod
-    def _assert_non_error_response(klass, response):
+    def _assert_non_error_response(cls, response):
         if response.status_code != 200:
             raise SAMLError(
-                klass._ERROR_BAD_RESPONSE % (response.status_code,
-                                             response.url))
+                cls._ERROR_BAD_RESPONSE % (response.status_code,
+                                           response.url))
 
     @classmethod
-    def _extract_saml_assertion_from_response(klass, response_body):
-        parsed = klass._parse_form_from_html(response_body)
+    def _extract_saml_assertion_from_response(cls, response_body):
+        parsed = cls._parse_form_from_html(response_body)
         if parsed is not None:
-            assertion = klass._get_value_of_first_tag(
+            assertion = cls._get_value_of_first_tag(
                 parsed, 'input', 'name', 'SAMLResponse')
             if assertion is not None:
                 return assertion
@@ -203,7 +203,7 @@ class GenericFormsBasedAuthenticator(SAMLAuthenticator):
         # invalid password when trying to login, many IdPs will return a 200
         # status code and return HTML content that indicates an error occurred.
         # This is the error we'll present to the user.
-        raise SAMLError(klass._ERROR_LOGIN_FAILED)
+        raise SAMLError(cls._ERROR_LOGIN_FAILED)
 
     @staticmethod
     def _parse_form_from_html(html):
@@ -212,24 +212,27 @@ class GenericFormsBasedAuthenticator(SAMLAuthenticator):
         parser.feed(html)
         if parser.forms:
             return ET.fromstring(parser.extract_form(0))
+        return None
 
     @staticmethod
     def _get_value_of_first_tag(root, tag, attr, trait):
         for element in root.findall(tag):
             if element.attrib.get(attr) == trait:
                 return element.attrib.get('value')
+        return None
 
     @staticmethod
     def _append_query_string(url, kv):
         """
-        Takes an arbitrary URL that may or may not have a query string.
+        Take an arbitrary URL that may or may not have a query string.
+
         Adds key=value pairs to the query string from a dictionary of
         string:[string, string] items.
         """
         u = urlparse(url)
         qs = parse_qs(u.query)
         for k, v in kv.items():
-          qs[k] = qs.get(k, []) + v
+            qs[k] = qs.get(k, []) + v
         u = u._replace(query=urlencode(qs, doseq=True))
         return u.geturl()
 
@@ -254,7 +257,7 @@ class OktaAuthenticator(GenericFormsBasedAuthenticator):
     )
 
     _MSG_AUTH_CODE = (
-        "Authentication code (RETURN to cancel): "
+        "Authentication code: "
     )
 
     _MSG_ANSWER = (
@@ -296,7 +299,7 @@ class OktaAuthenticator(GenericFormsBasedAuthenticator):
 
     def process_mfa_totp(self, endpoint, url, statetoken):
         while True:
-            response = self.get_response(self._MSG_AUTH_CODE)
+            response = self._password_prompter(self._MSG_AUTH_CODE)
             totp_response = self._requests_session.post(
                 url,
                 headers={'Content-Type': 'application/json',
@@ -313,8 +316,7 @@ class OktaAuthenticator(GenericFormsBasedAuthenticator):
                                         % error)
 
     def process_mfa_push(self, endpoint, url, statetoken):
-        self._password_prompter(("Waiting for result of push notification ..."
-                                 "press RETURN to continue"))
+        self._password_prompter(("Press RETURN to send push notification..."))
         while True:
             totp_response = self._requests_session.post(
                 url,
@@ -407,8 +409,7 @@ class OktaAuthenticator(GenericFormsBasedAuthenticator):
             count, prompt = self.display_mfa_choices(parsed)
             prompt = ("Please choose from the following authentication"
                       " choices:\r\n") + prompt
-            prompt += ("Enter the number corresponding to your choice "
-                       "or press RETURN to cancel authentication: ")
+            prompt += ("Enter the number corresponding to your choice: ")
             response = self._password_prompter(prompt)
             choice = 0
             try:
@@ -483,10 +484,12 @@ class OktaAuthenticator(GenericFormsBasedAuthenticator):
         # original code to keep the tests happy as the tests don't use
         # valid Okta responses ...
         session_token = parsed['sessionToken']
-        saml_url = self._append_query_string(endpoint, {'sessionToken': [session_token]})
+        saml_url = self._append_query_string(
+            endpoint, {'sessionToken': [session_token]})
         response = self._requests_session.get(saml_url)
         logger.info(
-            'Received HTTP response of status code: %s', response.status_code)
+            'Received HTTP response of status code: %s',
+            response.status_code)
         r = self._extract_saml_assertion_from_response(response.text)
         logger.info(
             'Received the following SAML assertion: \n%s', r,

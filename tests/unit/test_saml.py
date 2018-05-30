@@ -350,9 +350,11 @@ class TestSAMLGenericFormsBasedAuthenticator(object):
             generic_auth.retrieve_saml_assertion(generic_config)
 
     def test_append_query_string(self, generic_auth):
-        appended = generic_auth._append_query_string('https://www.google.com/search?q=42',
-                                                     {'hl': ['en']})
-        assert appended == 'https://www.google.com/search?q=42&hl=en'
+        appended = generic_auth._append_query_string(
+            'https://www.google.com/search?q=42', {'hl': ['en']}
+        )
+        assert 'hl=en' in appended
+
 
 class TestOktaAuthenticator(object):
     def test_is_suitable(self, okta_auth, okta_config):
