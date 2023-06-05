@@ -1,0 +1,11 @@
+# BEGIN TERRAFORM MANAGED BLOCK
+"apiVersion": "backstage.io/v1alpha1"
+"kind": "Location"
+"metadata":
+  "annotations":
+    "github.com/project-slug": "LiveRamp/awsprocesscreds"
+  "description": "Process credential providers for AWS SDKs and Tools"
+  "name": "awsprocesscreds"
+  "tags": []
+"spec": {}
+# END TERRAFORM MANAGED BLOCK  
