@@ -7,5 +7,4 @@
   "description": "Process credential providers for AWS SDKs and Tools"
   "name": "awsprocesscreds"
   "tags": []
-"spec": {}
 # END TERRAFORM MANAGED BLOCK
